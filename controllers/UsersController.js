@@ -33,10 +33,10 @@ const postNew = async (req, res) => {
     const result = await usersCollection.insertOne(newUser);
 
     // Respond with the new user
-    res.status(201).json({ id: result.insertedId, email: newUser.email });
+    return res.status(201).json({ id: result.insertedId, email: newUser.email });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 };
 
