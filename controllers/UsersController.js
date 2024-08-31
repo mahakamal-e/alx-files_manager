@@ -1,37 +1,51 @@
-import dbClient from '../utils/db';
-import { hashPwd } from '../utils/utils';
+import crypto from 'crypto';
+import { MongoClient } from 'mongodb';
 
-class UsersController {
-  static async postNew(req, res) {
+const uri = process.env.MONGODB_URI; // Make sure to set this environment variable
+const client = new MongoClient(uri);
+const dbName = 'files_manager';
+const collectionName = 'users';
+
+const hashPassword = (password) => {
+    return crypto.createHash('sha1').update(password).digest('hex');
+};
+
+const postNew = async (req, res) => {
     const { email, password } = req.body;
 
     if (!email) {
-      return res.status(400).json({ error: 'Missing email' });
+        return res.status(400).json({ error: 'Missing email' });
     }
     if (!password) {
-      return res.status(400).json({ error: 'Missing password' });
+        return res.status(400).json({ error: 'Missing password' });
     }
 
     try {
-      if (await dbClient.getUserByEmail(email)) {
-        return res.status(400).json({ error: 'Already exist' });
-      }
+        await client.connect();
+        const db = client.db(dbName);
+        const usersCollection = db.collection(collectionName);
 
-      const user = await dbClient.addUser({ email, password: hashPwd(password) });
+        // Check if email already exists
+        const existingUser = await usersCollection.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ error: 'Already exist' });
+        }
 
-      const { insertedId } = user;
+        // Create new user
+        const hashedPassword = hashPassword(password);
+        const newUser = { email, password: hashedPassword };
+        const result = await usersCollection.insertOne(newUser);
 
-      return res.status(201).json({ id: insertedId, email });
-    } catch (err) {
-      console.error(err);
-      return res.status(500).send('Internal server error');
+        // Respond with the new user
+        res.status(201).json({ id: result.insertedId, email: newUser.email });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    } finally {
+        await client.close();
     }
-  }
+};
 
-  static async getMe(req, res) {
-    const { user } = req;
-    return res.status(200).json(user);
-  }
-}
-
-export default UsersController;
+export default {
+    postNew,
+};
