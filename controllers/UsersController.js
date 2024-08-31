@@ -1,10 +1,5 @@
 import crypto from 'crypto';
-import { MongoClient } from 'mongodb';
-
-const uri = process.env.MONGODB_URI; // Make sure to set this environment variable
-const client = new MongoClient(uri);
-const dbName = 'files_manager';
-const collectionName = 'users';
+import dbClient from '../utils/db'; // Import the DBClient instance
 
 const hashPassword = (password) => {
     return crypto.createHash('sha1').update(password).digest('hex');
@@ -21,9 +16,12 @@ const postNew = async (req, res) => {
     }
 
     try {
-        await client.connect();
-        const db = client.db(dbName);
-        const usersCollection = db.collection(collectionName);
+        if (!dbClient.isAlive()) {
+            await dbClient.connect(); // Ensure connection is established
+        }
+        
+        const db = dbClient.db;
+        const usersCollection = db.collection('users');
 
         // Check if email already exists
         const existingUser = await usersCollection.findOne({ email });
@@ -41,8 +39,6 @@ const postNew = async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Internal Server Error' });
-    } finally {
-        await client.close();
     }
 };
 
