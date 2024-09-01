@@ -1,76 +1,69 @@
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
-import { promisify } from 'util';
-import File from '../models/File';
-import User from '../models/User';
+import { MongoClient, ObjectId } from 'mongodb';
+import { Base64 } from 'js-base64';
 
-const writeFile = promisify(fs.writeFile);
-const mkdir = promisify(fs.mkdir);
+const url = process.env.DB_URL; // Your MongoDB connection string
+const dbName = process.env.DB_NAME || 'files_manager'; // Database name
 
-const postUpload = async (req, res) => {
-  try {
-    const { name, type, parentId = 0, isPublic = false, data } = req.body;
-    const token = req.headers['x-token'];
-    
-    if (!token) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    const user = await User.findOne({ token });
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    if (!name) {
-      return res.status(400).json({ error: 'Missing name' });
-    }
-    
-    if (!type || !['folder', 'file', 'image'].includes(type)) {
-      return res.status(400).json({ error: 'Missing or invalid type' });
-    }
-    
-    if (type !== 'folder' && !data) {
-      return res.status(400).json({ error: 'Missing data' });
-    }
-    
-    if (parentId) {
-      const parentFile = await File.findById(parentId);
-      if (!parentFile) {
-        return res.status(400).json({ error: 'Parent not found' });
+class FilesController {
+  static async postUpload(req, res) {
+    const client = new MongoClient(url, { useNewUrlParser: true, useUnifiedTopology: true });
+
+    try {
+      await client.connect();
+      const db = client.db(dbName);
+      const filesCollection = db.collection('files');
+      const usersCollection = db.collection('users');
+
+      const { name, type, parentId = '0', isPublic = false, data } = req.body;
+      const userId = req.userId; // Assuming you've set userId based on the token
+
+      if (!name) return res.status(400).json({ error: 'Missing name' });
+      if (!type || !['folder', 'file', 'image'].includes(type)) return res.status(400).json({ error: 'Missing type' });
+
+      if (type !== 'folder' && !data) return res.status(400).json({ error: 'Missing data' });
+
+      let parentFile = null;
+      if (parentId !== '0') {
+        parentFile = await filesCollection.findOne({ _id: ObjectId(parentId) });
+        if (!parentFile) return res.status(400).json({ error: 'Parent not found' });
+        if (parentFile.type !== 'folder') return res.status(400).json({ error: 'Parent is not a folder' });
       }
-      if (parentFile.type !== 'folder') {
-        return res.status(400).json({ error: 'Parent is not a folder' });
+
+      const fileData = {
+        userId: ObjectId(userId),
+        name,
+        type,
+        isPublic,
+        parentId: parentId === '0' ? '0' : ObjectId(parentId),
+      };
+
+      if (type === 'folder') {
+        const result = await filesCollection.insertOne(fileData);
+        return res.status(201).json(result.ops[0]);
       }
-    }
-    
-    let localPath = null;
-    if (type !== 'folder') {
+
       const folderPath = process.env.FOLDER_PATH || '/tmp/files_manager';
-      await mkdir(folderPath, { recursive: true });
-      const fileId = uuidv4();
-      localPath = path.join(folderPath, fileId);
-      await writeFile(localPath, Buffer.from(data, 'base64'));
-    }
-    
-    const file = new File({
-      userId: user._id,
-      name,
-      type,
-      isPublic,
-      parentId,
-      localPath,
-    });
-    
-    await file.save();
-    
-    res.status(201).json(file);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
+      if (!fs.existsSync(folderPath)) {
+        fs.mkdirSync(folderPath, { recursive: true });
+      }
 
-export default {
-  postUpload,
-};
+      const localPath = path.join(folderPath, uuidv4());
+      fs.writeFileSync(localPath, Base64.decode(data));
+
+      fileData.localPath = localPath;
+      const result = await filesCollection.insertOne(fileData);
+
+      return res.status(201).json(result.ops[0]);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ error: 'Internal server error' });
+    } finally {
+      await client.close();
+    }
+  }
+}
+
+export default FilesController;
