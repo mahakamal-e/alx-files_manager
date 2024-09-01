@@ -1,0 +1,4 @@
+db.users.insertOne({
+  email: "testuser@example.com",
+  password: "hashedpassword" // Replace with the hashed password
+});

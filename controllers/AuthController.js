@@ -1,7 +1,14 @@
 import { v4 as uuidv4 } from 'uuid';
 import redisClient from '../utils/redis';
 import dbClient from '../utils/db';
-import hashPassword from '../utils/utils';
+import crypto from 'crypto';
+
+// Hashing function for passwords
+const hashPassword = (password) => {
+  const hash = crypto.createHash('sha256');
+  hash.update(password);
+  return hash.digest('hex');
+};
 
 class AuthController {
   static async getConnect(req, res) {
